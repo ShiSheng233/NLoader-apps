@@ -16,9 +16,8 @@
 #define NLR_ERROR_READ    3
 #define NLR_EXIT_REQUEST  4
 
-/* File access is confined to B:\NLOADER (appendix B), so the path is fully
- * qualified inside that directory. */
-static const char hello_path[] = "B:\\NLOADER\\HELLO.TXT";
+/* Relative paths stay inside the loader's configured card directory. */
+static const char hello_path[] = "HELLO.TXT";
 
 int32_t nlr_app_main(const struct nlr_api *api)
 {
