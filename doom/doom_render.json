@@ -1,0 +1,10 @@
+{
+  "id": "doom_render",
+  "kind": "foreground",
+  "display_name": "DOOM render",
+  "file": "APPS/DOOMREND.NLB",
+  "min_abi": 3,
+  "abi_version": 3,
+  "entry_symbol": "nlr_app_main",
+  "models": "z8/3.11"
+}
