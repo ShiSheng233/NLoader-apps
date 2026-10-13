@@ -5,7 +5,7 @@
 
 int32_t nlr_extension_init(const struct nlr_api *api)
 {
-    if (!api || api->abi != NLR_ABI_VERSION)
+    if (!api || api->abi < 2u)
         return -NLR_API_EINVAL;
     if (!api->menu_register)
         return -NLR_API_ENOSYS;

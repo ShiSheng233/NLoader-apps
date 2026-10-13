@@ -25,7 +25,7 @@ int32_t nlr_app_main(const struct nlr_api *api)
     int fd;
     int got;
 
-    if (api == 0 || api->abi > NLR_ABI_VERSION)
+    if (api == 0 || api->abi < 2u)
         return NLR_ERROR_NO_API; /* never trust a table newer than this SDK */
 
     api->ui_draw_text(0, 0, "hello: NLoader");
