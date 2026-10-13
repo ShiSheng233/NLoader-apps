@@ -1,0 +1,9 @@
+{
+  "id": "wad_check",
+  "kind": "foreground",
+  "display_name": "WAD check",
+  "file": "APPS/WADCHECK.NLB",
+  "min_abi": 2,
+  "abi_version": 2,
+  "models": "z8/3.11"
+}
