@@ -1,0 +1,9 @@
+{
+  "id": "doom",
+  "kind": "foreground",
+  "display_name": "DOOM",
+  "file": "APPS/DOOM.NLB",
+  "min_abi": 3,
+  "abi_version": 3,
+  "models": "Z6III/2.00"
+}
