@@ -3,10 +3,7 @@
   "kind": "foreground",
   "display_name": "Files",
   "file": "APPS/FM.NLB",
-  "min_abi": 3,
-  "abi_version": 3,
-  "models": "Z6III/2.00",
-  "settings": [
-    { "key": "card", "label": "Start card", "choices": ["Choose", "A:", "B:"], "default": 0 }
-  ]
+  "min_abi": 4,
+  "abi_version": 4,
+  "models": "z8/3.11,z6iii/2.00"
 }

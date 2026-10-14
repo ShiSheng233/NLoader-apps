@@ -90,7 +90,7 @@ int nlr_wad_open(struct nlr_wad *wad, const struct nlr_api *api,
         return NLR_WAD_ARGUMENT;
     if (wad->fd >= 0)
         return NLR_WAD_BUSY;
-    if (!api || !api->abi || api->abi > NLR_ABI_VERSION || !api->fs_open ||
+    if (!api || api->abi < 2u || !api->fs_open ||
         !api->fs_seek || !api->fs_read || !api->fs_close)
         return NLR_WAD_API;
     nlr_wad_init(wad);

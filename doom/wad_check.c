@@ -39,7 +39,7 @@ static int sample_ends(struct nlr_wad *wad, uint32_t checksums[2])
 
 int32_t nlr_app_main(const struct nlr_api *api)
 {
-    if (!api || !api->abi || api->abi > NLR_ABI_VERSION ||
+    if (!api || api->abi < 2u ||
         !api->log || !api->ui_draw_text)
         return NLR_WAD_API;
     struct nlr_wad wad;

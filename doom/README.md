@@ -1,7 +1,15 @@
-# WAD 读取与检查
+# DOOM 示例与 WAD 检查
 
-这是 M3 的独立前台诊断程序，不包含 DOOM 引擎或游戏数据。它从配置的
-NLoader 卡目录读取 `DOOM.WAD`，不写卡、不调用图形接口，不宣称游戏可玩。
+本目录包含三个不同的前台程序：
+
+- `WADCHECK.NLB` 是独立 WAD 文件诊断，从配置的 NLoader 卡目录读取 `DOOM.WAD`，
+  不包含引擎、不写卡、不调用图形接口。下面的格式说明与构建命令属于这个程序。
+- `DOOM.NLB` 使用固定在 `engine/` 的完整 `doomgeneric` 引擎和 `port/` 移植层，
+  读取实际 `GAME.WAD`，进入第一关并持续接收真实 SDK 按键，游戏菜单可正常退出。
+- `DOOMREND.NLB` 是独立的无输入、90 帧绘图诊断。先前 run-016 验证的是这种绘图路径；
+  持续交互程序已另外通过实际 QEMU 按键验收。构建与按键见 [移植说明](port/README.md)。
+
+游戏资源不随源码提供；合成 WAD 检查与完整引擎运行分别记录。
 
 `wad.c` 独立实现 WAD 文件访问。格式依据为 id Software 公布的
 [w_wad.h](https://github.com/id-Software/DOOM/blob/master/linuxdoom-1.10/w_wad.h)
@@ -78,13 +86,33 @@ cargo test --locked -p nloader-build --test wad -- --ignored
 另用 AArch64 构建两次，比较程序与 MANIFEST，并独立读取执行头中的类型与版本。
 测试不包含商业 WAD，不访问相机，也不替代 QEMU 或真实游戏数据验收。
 
-## 完整 DOOM 尚缺的条件
+## 完整引擎的现状与边界
 
-当前仅提供 WAD 文件访问。SDK 像素输出、原始输入和时钟/睡眠仍需实现和验证；
-已显示的固定诊断图不等于连续、独占全屏绘制。
+引擎固定为 `doomgeneric@e257a09527062bfb986b6e5e0780839b6cbd5b71`，
+保留上游 GPLv2 许可。2026-10-14 移植改用 ABI4 的时间、等待和 Y0Y1UV+A8 图形接口，
+逐帧通过 `ui_present` 提交，结束时归还画面；使用明确的按键位映射。
+已补齐所需 C 库及 data→data/BSS 指针支持，完整引擎主机运行通过。
+以下2026-10-13的构建和 QEMU 结果属于旧 ABI3/RGBA 候选，不抵扣新接口验证。
+当前使用 2 MiB 引擎内存池；512 KiB 程序载入区属于本次 QEMU 隔离配置，不代表
+生产 B: 配置或真机内存已经验收。
 
-候选引擎 [doomgeneric](https://github.com/ozkl/doomgeneric) 提供绘帧、按键、
-毫秒时钟和睡眠的移植入口，但还依赖 C 标准库，默认游戏内存池为 6 MiB。
-现有打包器还不支持其菜单初值中指向可写数据的指针。本示例未引入该引擎；
-后续应固定源码版本、保留其许可证，并分别验证内存、打包、输入、连续显示和
-退出后返回列表。游戏资源须另外提供，不能把合成 WAD 验证记作 DOOM 验收。
+实际 Freedoom 0.13.0 Phase 2 已通过原厂 NVMe/exFAT 流程读取。最终 `run-016`
+使用 `visible-menu-candidate`，同一会话两次各完成 90 帧、退出 0，文件和全部
+程序/图形分配清理，模拟器已停止。两次退出后的整个列表 RGB 均与运行前逐字节
+相同，随后原厂 Setup 仍可导航，不能将此结果缩写成仅有返回码成功。
+
+两张游戏原 PNG 均完整显示场景、武器和状态栏，可查看
+[第一次游戏画面](../../../build/m3-doom-qemu-20261013/run-016/scenario-12-doom-1-frame-86.png)、
+[第二次游戏画面](../../../build/m3-doom-qemu-20261013/run-016/scenario-23-doom-2-frame-82.png)及
+[退出后的列表](../../../build/m3-doom-qemu-20261013/run-016/scenario-25-returned-list.png)。
+完整结果见 `build/m3-doom-qemu-20261013/run-016/execution-check.json`。
+此前遮挡、导航错误和退出黑屏样本仍保留，诊断原因与最终修复见
+[M3 记录](../../../docs/M3.md)。
+
+交互版另在 `build/m3-doom-input-20261013/run-001/` 通过12个原厂按键、实际
+移动/转向/射击及松键、暂停、超过600帧持续运行、正常Quit与三种退出组合。
+同会话四次进入/退出资源清理通过，四张返回列表的整个 RGB 与运行前一致；
+模拟器已停止，结果与截图见 [M3记录](../../../docs/M3.md)。
+独占全屏、完整引擎与扩展共存、性能和全地图预算均未验，M3 尚未完成。
+完成计数不能代替实际原图核对；本地与 QEMU
+结果也不代表真机或物理卡通过。
