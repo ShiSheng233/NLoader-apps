@@ -1,0 +1,16 @@
+{
+  "id": "theme",
+  "kind": "resource_extension",
+  "display_name": "Theme",
+  "file": "APPS/THEME.NLB",
+  "min_abi": 8,
+  "abi_version": 8,
+  "models": "z6iii/2.00",
+  "describe": true,
+  "description": {
+    "role": "extension",
+    "summary": "Re-colours the camera's own menus with the new UI's palette",
+    "version": "2.0.0",
+    "uses": ["table:gui.palette"]
+  }
+}

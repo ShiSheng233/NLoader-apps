@@ -1,0 +1,15 @@
+{
+  "id": "fwdump",
+  "kind": "foreground",
+  "display_name": "Firmware tables",
+  "file": "APPS/FWDUMP.NLB",
+  "min_abi": 8,
+  "abi_version": 8,
+  "models": "z6iii/2.00",
+  "describe": true,
+  "description": {
+    "role": "app",
+    "summary": "Reads named firmware tables to the card (research)",
+    "version": "0.1.0"
+  }
+}

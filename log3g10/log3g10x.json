@@ -1,0 +1,9 @@
+{
+  "id": "log3g10_start",
+  "kind": "resource_extension",
+  "display_name": "Log3G10 at start",
+  "file": "APPS/LOG3G10X.NLB",
+  "min_abi": 5,
+  "models": "Z6III/2.00",
+  "abi_version": 5
+}

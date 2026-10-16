@@ -1,0 +1,9 @@
+{
+  "id": "log3g10",
+  "kind": "foreground",
+  "display_name": "Log3G10",
+  "file": "APPS/LOG3G10.NLB",
+  "min_abi": 5,
+  "models": "Z6III/2.00",
+  "abi_version": 5
+}
