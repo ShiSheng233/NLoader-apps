@@ -1,0 +1,8 @@
+{
+  "id": "uidemo",
+  "kind": "foreground",
+  "display_name": "UI demo",
+  "file": "APPS/UIDEMO.NLB",
+  "min_abi": 6,
+  "models": "Z6III/2.00"
+}
