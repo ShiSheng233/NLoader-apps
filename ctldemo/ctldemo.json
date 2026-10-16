@@ -1,0 +1,8 @@
+{
+  "id": "ctldemo",
+  "kind": "foreground",
+  "display_name": "Control demo",
+  "file": "APPS/CTLDEMO.NLB",
+  "min_abi": 7,
+  "models": "Z8/3.11"
+}
