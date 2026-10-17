@@ -1,0 +1,16 @@
+{
+  "id": "storespy",
+  "kind": "resource_extension",
+  "display_name": "Store spy",
+  "file": "APPS/SPY.NLB",
+  "min_abi": 7,
+  "abi_version": 7,
+  "models": "z6iii/2.00",
+  "describe": true,
+  "description": {
+    "role": "service",
+    "summary": "Logs every change of the camera's settings store (research)",
+    "version": "0.1.0",
+    "uses": ["prop:*"]
+  }
+}

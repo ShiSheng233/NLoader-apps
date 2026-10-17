@@ -1,0 +1,8 @@
+{
+  "id": "dcimtest",
+  "kind": "foreground",
+  "display_name": "DCIM test",
+  "file": "APPS/DCIMTEST.NLB",
+  "min_abi": 9,
+  "models": "z8/3.11"
+}
