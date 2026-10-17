@@ -1,0 +1,11 @@
+{
+  "id": "abi8test",
+  "kind": "foreground",
+  "display_name": "ABI 8 test",
+  "file": "APPS/ABI8T.NLB",
+  "min_abi": 8,
+  "abi_version": 8,
+  "models": "z8/3.11",
+  "describe": true,
+  "description": { "role": "shell", "summary": "Checks the firmware-by-name calls" }
+}
