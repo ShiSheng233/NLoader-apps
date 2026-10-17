@@ -30,24 +30,3 @@ int patch_words(const struct nlr_api *api, uint64_t site, uint32_t words,
     }
     return api->code_patch((void *)(uintptr_t)site, buffer, words * 4u);
 }
-
-int code_write(const struct nlr_api *api, uint64_t dst, const void *src,
-               uint32_t len)
-{
-    const uint8_t *from = src;
-    if (!api || !api->code_patch || (dst & 3u) || (len & 3u))
-        return -NLR_API_EINVAL;
-    while (len) {
-        uint32_t room = 64u - (uint32_t)(dst & 63u);
-        uint32_t chunk = len < room ? len : room;
-        if (chunk > NLR_CODE_PATCH_MAX)
-            chunk = NLR_CODE_PATCH_MAX;
-        int result = api->code_patch((void *)(uintptr_t)dst, from, chunk);
-        if (result != 0)
-            return result;
-        dst += chunk;
-        from += chunk;
-        len -= chunk;
-    }
-    return 0;
-}

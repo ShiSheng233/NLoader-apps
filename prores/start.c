@@ -8,11 +8,9 @@
  *
  *   VIDEO RECORDING MENU, after "Video quality (N-RAW)":
  *       Video quality (ProRes)        HQ | 422 | LT | PROXY
- *   d3 Pre-Release Capture options, third row:
- *       Pre-release RAW (HE)          ON / OFF
  *
- * Both choices are stored in padding bytes of the camera's own settings
- * store, so they are saved with the shooting bank and survive a power
+ * The choice is stored in a padding byte of the camera's own settings
+ * store, so it is saved with the shooting bank and survives a power
  * cycle. Nothing else of the camera is changed: six instructions of the
  * record service, the demuxer and the shooting display, a call in the
  * sample-description builder, and pointers in .data -- every one of them
@@ -24,11 +22,6 @@
  * a failing extension holds NLoader's interruption marker and pauses the
  * next start, which is not what "this firmware is not mine" deserves.
  *
- * The pre-release switch stores its setting and nothing reads it yet: the
- * frame-retention side (keeping the HSFC ring's HE RAW payload and writing
- * it beside the JPEG) is the next step, and without the writing half,
- * retaining would only starve the ring. See README.md.
- *
  * No writable static data: an extension that had any would cost a second
  * 2 MiB execution block. Everything the camera reads from this program is
  * in one block from the loader's allocator, which the callbacks find again
@@ -38,7 +31,6 @@
 #include "block.h"
 #include "codec.h"
 #include "menu.h"
-#include "pre.h"
 
 #define LOG_PATH "APPS/PRORES.LOG"
 #define LINE_MAX 200u
@@ -173,21 +165,6 @@ int32_t nlr_extension_init(const struct nlr_api *api)
     }
     put(&l, "; rows added");
 
-    /* The pre-release export is independent of both halves above: it only
-     * needs its own three instructions and the trampoline's gap. */
-    if (!pre_fingerprint()) {
-        put(&l, "; no pre-release export (firmware or gap differs)");
-    } else {
-        result = pre_install(api, (uint64_t)(uintptr_t)block);
-        if (result != 0) {
-            put(&l, "; pre-release export failed (");
-            put_int(&l, result);
-            put(&l, ")");
-        } else {
-            put(&l, "; pre-release export armed, switch ");
-            put(&l, pre_raw_on() ? "on" : "off");
-        }
-    }
     record(api, &l);
     return 0;
 }

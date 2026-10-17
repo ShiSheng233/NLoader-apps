@@ -21,7 +21,7 @@ COMMON="--target=aarch64-none-elf -march=armv8-a -mgeneral-regs-only
  -fno-asynchronous-unwind-tables -fPIC -fvisibility=hidden -nostdinc
  -isystem $RES -I $SDK -I $HERE -fno-jump-tables -fno-builtin -O2
  -Wall -Wextra -Werror"
-for f in block codec menu pre start; do
+for f in block codec menu start; do
     $CC $COMMON -c "$HERE/$f.c" -o "$OUT/obj/$f.o"
 done
 $CC --target=aarch64-none-elf -x assembler-with-cpp -DNLR_PROGRAM_EXTENSION \
@@ -30,6 +30,6 @@ N="$ROOT/tool/nloader/target/debug/nloader"
 "$N" program --decl "$HERE/prores.json" \
     --object "$OUT/obj/crt0.o" --object "$OUT/obj/start.o" \
     --object "$OUT/obj/menu.o" --object "$OUT/obj/codec.o" \
-    --object "$OUT/obj/block.o" --object "$OUT/obj/pre.o" \
+    --object "$OUT/obj/block.o" \
     --manifest "$OUT/MANIFEST" --out "$OUT/PRORES.NLB"
 ls -l "$OUT/PRORES.NLB"

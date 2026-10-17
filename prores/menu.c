@@ -18,11 +18,10 @@
  *     event action, which the dispatcher runs before it builds the page,
  *     and the N-RAW row's action (a copy of its table, with one action
  *     changed) puts the stock record back. One window, two pages.
- *   - Custom setting d3, Pre-Release Capture options, gets a third row:
- *     an ON/OFF switch like the camera's own.
  *   - Two handler pointers are wrapped: the video menu's refresh, so the
- *     row shows the grade at its right, and d3's, so the switch shows its
- *     state. Both call the stock handler first and keep its result.
+ *     row shows the grade at its right, and the sub-page's entry, so the
+ *     title and the mark are ours when our record is in place. Both call
+ *     the stock handler when the stock answer is the right one.
  *
  * All of it lives in one block from the loader's allocator. None of the
  * callbacks below keeps a pointer to it -- a resident extension with
@@ -39,7 +38,6 @@ static const uint32_t OPT_ID[GRADES] = {
 };
 
 #define TITLE_TEXT "Video quality (ProRes)"
-#define D3_TEXT    "Pre-release RAW (HE)"
 
 /* ---- small readers ------------------------------------------------------ */
 
@@ -79,7 +77,7 @@ static int slot_ready(uint32_t slot)
 int menu_slots_ready(void)
 {
     if (!slot_ready(SLOT_VIDEO_LABEL) || !slot_ready(SLOT_VIDEO_VALUE) ||
-        !slot_ready(SLOT_SUB_TITLE) || !slot_ready(SLOT_D3_LABEL))
+        !slot_ready(SLOT_SUB_TITLE))
         return 0;
     for (uint32_t i = 0; i < GRADES; i++)
         if (!slot_ready(SLOT_OPT0 + i))
@@ -173,32 +171,6 @@ static uint64_t video_refresh(void *window)
         fw_text_bind(value, SLOT_VIDEO_VALUE);
     }
     return result;
-}
-
-static uint64_t d3_refresh(void *window)
-{
-    uint64_t result = FW(fw_handler_t, D3_REFRESH)(window);
-    void *value = fw_row_value(window, ITEM_D3_ROW, VALUE_WIDGET);
-    if (value)
-        fw_switch_set(value, pre_raw_on());
-    return result;
-}
-
-/* OK on the switch: the camera's switches flip and stay on the page. The
- * stored byte is this plugin's instead of a store item, and the rest --
- * the toggle's new pictures, the row marked, the page repainted -- is the
- * tail of the camera's own switch action, called with the state. The item
- * record's value word follows too, so a page built again without a
- * refresh shows the same thing. */
-static void toggle_pre_raw(struct fw_nav *nav)
-{
-    uint32_t on = pre_raw_on() ? 0u : 1u;
-    wr8(STORE_PRE_RAW, (uint8_t)on);
-    uint64_t record = plugin_block() - OFF_VIDEO_ITEMS + OFF_D3_ITEMS +
-                      D3_ROWS * ITEM_BYTES;
-    *(volatile uint32_t *)(uintptr_t)(record + ITEM_VALUE) =
-        on ? SWITCH_ON : SWITCH_OFF;
-    fw_switch_apply(nav->window, on);
 }
 
 /* ---- building the copies ------------------------------------------------ */
@@ -336,32 +308,6 @@ static void sub_arrays(uint64_t block)
     }
 }
 
-/* Pre-Release Capture options: three rows, the third a switch of ours. */
-static void d3_arrays(uint64_t block)
-{
-    uint64_t anchor = D3_ITEMS + D3_ANCHOR_ROW * ITEM_BYTES;
-    uint64_t anchor_table = rd64(D3_EVPTRS + D3_ANCHOR_ROW * 8u);
-    uint32_t records = table_len(anchor_table);
-
-    clone_table(block + OFF_D3_TABLE, anchor_table, records, D3_SUB_WINDOW,
-                (uint64_t)(uintptr_t)&toggle_pre_raw, NAV_STAY);
-
-    for (uint32_t row = 0; row < D3_ROWS; row++) {
-        block_copy_fw(block + OFF_D3_ITEMS + row * ITEM_BYTES,
-                      D3_ITEMS + row * ITEM_BYTES, ITEM_BYTES);
-        wr64(block + OFF_D3_EVPTRS + row * 8u, rd64(D3_EVPTRS + row * 8u));
-    }
-
-    uint8_t record[ITEM_BYTES];
-    item_from(record, anchor);
-    item_set(record, ITEM_LABEL, SLOT_D3_LABEL);
-    item_set(record, ITEM_FLAGS, FLAGS_SWITCH_ROW | FLAGS_LABEL_SLOT);
-    item_set(record, ITEM_VALUE, pre_raw_on() ? SWITCH_ON : SWITCH_OFF);
-    item_set(record, ITEM_ID, ITEM_D3_ROW);
-    item_put(block + OFF_D3_ITEMS + D3_ROWS * ITEM_BYTES, record);
-    wr64(block + OFF_D3_EVPTRS + D3_ROWS * 8u, block + OFF_D3_TABLE);
-}
-
 /* ---- the fingerprint ---------------------------------------------------- */
 
 int menu_fingerprint(void)
@@ -378,20 +324,14 @@ int menu_fingerprint(void)
         rd64(SUB_PAGE + PAGE_EVPTRS) != SUB_EVPTRS ||
         rd16(SUB_PAGE + PAGE_COUNT) != SUB_ROWS)
         return 0;
-    if (rd64(D3_PAGE + PAGE_ITEMS) != D3_ITEMS ||
-        rd64(D3_PAGE + PAGE_EVPTRS) != D3_EVPTRS ||
-        rd16(D3_PAGE + PAGE_COUNT) != D3_ROWS)
-        return 0;
     /* The rows ours are cloned from, by item id. */
     if (item_get(VIDEO_ITEMS + VIDEO_NRAW_ROW * ITEM_BYTES, ITEM_ID) !=
             VIDEO_NRAW_ITEM ||
-        item_get(SUB_ITEMS, ITEM_ID) != 0x31b4u ||
-        item_get(D3_ITEMS + D3_ANCHOR_ROW * ITEM_BYTES, ITEM_ID) != 0x36e5u)
+        item_get(SUB_ITEMS, ITEM_ID) != 0x31b4u)
         return 0;
     /* The handlers the wrappers call. */
     if (rd64(VIDEO_HANDLERS + 4u * 8u) != VIDEO_REFRESH ||
-        rd64(SUB_HANDLERS) != SUB_ENTRY ||
-        rd64(D3_HANDLERS + 4u * 8u) != D3_REFRESH)
+        rd64(SUB_HANDLERS) != SUB_ENTRY)
         return 0;
     return 1;
 }
@@ -404,15 +344,13 @@ int menu_install(const struct nlr_api *api, uint64_t block)
     /* Every table this plugin hands the engine must terminate, or a build
      * would walk off the end of one. */
     if (!table_len(rd64(VIDEO_EVPTRS + VIDEO_NRAW_ROW * 8u)) ||
-        !table_len(rd64(SUB_EVPTRS)) ||
-        !table_len(rd64(D3_EVPTRS + D3_ANCHOR_ROW * 8u)))
+        !table_len(rd64(SUB_EVPTRS)))
         return -NLR_API_EINVAL;
 
     /* The texts first: a row built before its slot was written would draw
      * whatever the slot held. */
     fw_text_store(TITLE_TEXT, SLOT_VIDEO_LABEL, TEXT_STYLE_LABEL);
     fw_text_store(TITLE_TEXT, SLOT_SUB_TITLE, TEXT_STYLE_TITLE);
-    fw_text_store(D3_TEXT, SLOT_D3_LABEL, TEXT_STYLE_LABEL);
     for (uint32_t grade = 0; grade < GRADES; grade++)
         fw_text_store(codec_grade_name(grade), SLOT_OPT0 + grade,
                       TEXT_STYLE_LABEL);
@@ -420,7 +358,6 @@ int menu_install(const struct nlr_api *api, uint64_t block)
 
     video_arrays(block);
     sub_arrays(block);
-    d3_arrays(block);
 
     /* Now the .data words the engine reads. The arrays go in before the
      * counts, and the handlers last: until the count changes, the camera
@@ -430,12 +367,8 @@ int menu_install(const struct nlr_api *api, uint64_t block)
     wr64(VIDEO_PAGE + PAGE_EVPTRS, block + OFF_VIDEO_EVPTRS);
     wr16(VIDEO_PAGE + PAGE_COUNT, (uint16_t)(VIDEO_ROWS + 1u));
 
-    wr64(D3_PAGE + PAGE_ITEMS, block + OFF_D3_ITEMS);
-    wr64(D3_PAGE + PAGE_EVPTRS, block + OFF_D3_EVPTRS);
-    wr16(D3_PAGE + PAGE_COUNT, (uint16_t)(D3_ROWS + 1u));
 
     wr64(VIDEO_HANDLERS + 4u * 8u, (uint64_t)(uintptr_t)&video_refresh);
-    wr64(D3_HANDLERS + 4u * 8u, (uint64_t)(uintptr_t)&d3_refresh);
     wr64(SUB_HANDLERS, (uint64_t)(uintptr_t)&sub_entry);
     return 0;
 }

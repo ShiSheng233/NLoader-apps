@@ -50,23 +50,9 @@
 #define OFF_SUB_EVPTRS     0x1540u /* 4 * 8 */
 #define OFF_SUB_TABLES     0x1560u /* 4 event tables, one per option row */
 #define OFF_SUB_ELEMS      0x1c60u /* 4 * 0x44 */
-#define OFF_D3_ITEMS       0x1d80u /* 3 * 44 */
-#define OFF_D3_EVPTRS      0x1e10u /* 3 * 8 */
-#define OFF_D3_TABLE       0x1e30u /* 22 event records */
 #define OFF_RATE           0x2100u /* 12 * 24: the bit-rate table in use */
 #define OFF_CODECS         0x2240u /* 7 * 16: codec names by file type */
 #define OFF_TEMPLATE       0x22c0u /* 0x56: the sample description */
-#define OFF_PRE_STATE      0x2340u /* 0x40: what the pre-capture splice keeps */
-
-/* The second all-zero gap of the code window (0x41668678..0x41800000,
- * 1.6 MB). The pre-capture splice is a plain B, whose +-128 MB reach
- * covers this but not a program block in DRAM, so the trampoline that
- * saves the registers and calls into this program lives here. Checked for
- * zero before anything is written, as the first gap was -- and unlike the
- * first one, no loader build bundles a program here. */
-#define GAP_TRAMP          0x41668700u
-#define GAP_TRAMP_BYTES    0x100u
-
 #define FW_RATE_TABLE      0x42b72828u /* 12 rows of 24 bytes, rodata */
 #define FW_CODEC_TABLE     0x440899e0u /* {u64 key, u64 name} * 7, rodata */
 #define FW_DESC_TEMPLATE   0x42b7145au /* the 'apch' sample description */
@@ -93,16 +79,6 @@
 #define SUB_ENTRY          0x4058fc5cu  /* stock handler slot 0 */
 #define SUB_TITLE_CTL      0x82cu       /* the title element's control id */
 #define SUB_NRAW_WINDOW    0x119u
-
-/* ---- the Pre-Release Capture options page (custom setting d3, 0x1c0) ---- */
-#define D3_PAGE            0xa028c2d50ull
-#define D3_HANDLERS        0xa028f73b8ull
-#define D3_ITEMS           0x43b5039cu  /* rodata: 2 item records */
-#define D3_EVPTRS          0x43b503f8u
-#define D3_ROWS            2u
-#define D3_ANCHOR_ROW      1u           /* 0x36e5, the record ours is cloned from */
-#define D3_REFRESH         0x4054d5e0u  /* stock handler slot 4 */
-#define D3_SUB_WINDOW      0x1c2u       /* where the anchor's OK records point */
 
 /* ---- menu engine details ------------------------------------------------ */
 #define ITEM_BYTES         44u
@@ -132,17 +108,10 @@
  * string table and a value the page's refresh handler stores in a text
  * slot; bit 9 moves the label into a slot too, which is the combination
  * NLoader's own Setup row uses (0x101240) and the one QEMU drew as a value
- * row with both texts from slots (research/menus.md). A switch row carries
- * the loader's verified switch flags and an ON/OFF picture in the value. */
+ * row with both texts from slots (research/menus.md). */
 #define FLAGS_LABEL_SLOT   0x200u
 #define FLAGS_VALUE_SLOT   0x009u  /* bits 0 + 3: the value is a text slot */
 #define FLAGS_MARK         0x040u  /* the > mark */
-/* The complete word a stock switch row of this image carries (video menu
- * rows 1, 11, 12, ...): the loader's verified switch bits plus the two
- * the page's own style needs. */
-#define FLAGS_SWITCH_ROW   0x20901005u
-#define SWITCH_ON          0x133bu
-#define SWITCH_OFF         0x133cu
 
 /* Runtime text slots. The loader borrows 180..251 for its own page; the
  * stock image writes no constant slot above 189. These eight are the
@@ -151,7 +120,6 @@
 #define SLOT_VIDEO_VALUE   253u
 #define SLOT_OPT0          254u /* 254..257: the four grades */
 #define SLOT_SUB_TITLE     258u
-#define SLOT_D3_LABEL      259u
 #define TEXT_STYLE_LABEL   0x200u
 #define TEXT_STYLE_VALUE   4u
 #define TEXT_STYLE_TITLE   3u
@@ -162,7 +130,6 @@
  * named by no instruction immediate and by no aligned word anywhere in the
  * image. */
 #define ITEM_VIDEO_ROW     0x317du
-#define ITEM_D3_ROW        0x317fu
 #define ITEM_OPT_0         0x3cd5u
 #define ITEM_OPT_1         0x3cd7u
 #define ITEM_OPT_2         0x3cd9u
@@ -238,42 +205,16 @@
 #define CODEC_ROWS         7u
 #define CODEC_PRORES_KEY   4u
 
-/* ---- pre-release capture ------------------------------------------------
- *
- * Every frame of the pre-release history is TENC-compressed into a pool-63
- * slot as 14-bit HE RAW (3.0 bpp), decoded by TDEC for the JPEG, and then
- * released. The release is three instructions at the end of the TDEC
- * stage; the plugin branches away from the first of them, looks at the
- * frame, and lets the release run as it always did.
- */
-#define PRE_FREE_SITE      0x40e89854u /* LDR X0,[X23,#0x6C0] */
-#define PRE_FREE_STOCK_0   0xf94362e0u
-#define PRE_FREE_STOCK_1   0x9406efc0u /* BL free_E */
-#define PRE_FREE_STOCK_2   0xf90362ffu /* STR XZR,[X23,#0x6C0] */
-#define PRE_FREE_RESUME    0x40e89858u
-#define R_SLOT_E           0x6c0u /* the ring slot of this frame, in R */
-#define R_SLOT_M           0x710u /* its metadata block */
-#define E_SHAPE            0x38u  /* two u16: the sensor readout size */
-#define E_PAYLOAD          0x40u  /* 512-aligned, the TENC output */
-#define M_SEQUENCE         0x120u /* the frame's number in the burst */
-#define HE_RATE            30u    /* lane 12's rate index 2: 3.0 bpp */
-#define FX_WIDTH           6064u
-#define FX_HEIGHT          4040u
-#define PRE_DRAINED        0xa03d80018ull /* frames drained in this burst */
-#define PRE_FRAMES         0xa03d80fbcull /* the menu's pre-release count */
-#define HSFC_MODE          0xa03f1d044ull /* 3 C30, 4 C120, 5 C60, 6 C15 */
-
-/* ---- where the choices are stored --------------------------------------
+/* ---- where the choice is stored ----------------------------------------
  *
  * Group 0x0f of the camera's settings store holds the movie items; item
  * 0x0f0b (WbMovieSameStill) is one byte at the start of a four-byte slot
  * and the three bytes behind it are padding the store carries but no item
- * claims. The plugin keeps its two settings there, so they are saved and
- * restored with the bank the user is shooting (0x2b0 apart; bank A is the
- * one the menus edit).
+ * claims. The grade is the first of them (HERAW keeps its choice in the
+ * second), so it is saved and restored with the bank the user is shooting
+ * (0x2b0 apart; bank A is the one the menus edit).
  */
 #define STORE_PRORES_GRADE 0xa03f0aef5ull /* 0..3: HQ, 422, LT, Proxy */
-#define STORE_PRE_RAW      0xa03f0aef6ull /* 0 off, 1 on */
 #define STORE_ANCHOR       0xa03f0aef4ull /* item 0x0f0b itself, read to check */
 
 /* The runtime text slots the menu engine draws from: 300 records of 24
@@ -290,52 +231,27 @@
 #define FILE_TYPE_PRORES_422    4u
 
 /* ---- firmware functions ------------------------------------------------- */
-/* The card, through the firmware's own file services (the same entries the
- * loader's profile names): a hook handler runs on a camera task, where the
- * loader's API would attribute the call to whatever program is running. */
-typedef int32_t (*fw_file_open_t)(const char *path, uint32_t flags, uint32_t mode);
-typedef int32_t (*fw_file_write_t)(int32_t fd, const void *buf, uint32_t bytes,
-                                   uint32_t *written);
-typedef int32_t (*fw_file_close_t)(int32_t fd);
-typedef void (*fw_dcache_inv_t)(void *addr, uint32_t len);
-#define fw_file_open  FW(fw_file_open_t, 0x402e3674u)
-#define fw_file_write FW(fw_file_write_t, 0x402e37e0u)
-#define fw_file_close FW(fw_file_close_t, 0x402e36d4u)
-#define fw_dcache_inv FW(fw_dcache_inv_t, 0x40d32244u)
-/* The entry that writes dirty lines back rather than discarding them: the
- * card layer may take a buffer by DMA, so anything this program filled in
- * goes back to memory before it is handed over. */
-#define fw_dcache_clean FW(fw_dcache_inv_t, 0x40d321bcu)
-#define FILE_WRITE_CREATE 0x301u /* write + create + truncate */
-#define FILE_ATTRIBUTES   0x20u  /* the archive bit a new file gets */
-
 #define FW(type, address) ((type)(uintptr_t)(address))
 
 typedef uint32_t (*fw_setting_get_t)(uint32_t tagged_id);
+typedef uint32_t (*fw_setting_set_t)(uint32_t tagged_id, uint32_t value);
 typedef void *(*fw_widget_find_t)(uint32_t id, void *container);
 typedef void *(*fw_row_value_t)(void *window, uint32_t item_id, uint32_t kind);
 typedef void (*fw_text_store_t)(const char *text, uint32_t slot, uint32_t style);
 typedef void (*fw_text_bind_t)(void *widget, uint32_t slot);
 typedef void (*fw_widget_show_t)(void *widget, uint32_t visible);
-typedef void (*fw_switch_set_t)(void *widget, uint32_t on);
-/* The whole of what the camera's own switch rows do when OK is pressed on
- * them, minus the store write: it finds the row the cursor is on, writes
- * the ON or OFF pictures into its toggle, marks the row and repaints the
- * page (sub_405342bc, the tail of the stock switch action). */
-typedef uint64_t (*fw_switch_apply_t)(void *window, uint32_t on);
 typedef uint32_t (*fw_entry_guard_t)(void);
 typedef void (*fw_set_cursor_t)(void *window, uint32_t item_id);
 typedef uint64_t (*fw_set_mark_t)(void *window, uint32_t item_id, uint32_t marked);
 typedef uint64_t (*fw_handler_t)(void *window);
 
 #define fw_setting_get FW(fw_setting_get_t, 0x403ffcd0u)
+#define fw_setting_set FW(fw_setting_set_t, 0x403ffcd4u)
 #define fw_widget_find FW(fw_widget_find_t, 0x403ada94u)
 #define fw_row_value   FW(fw_row_value_t, 0x4052c7a0u)
 #define fw_text_store  FW(fw_text_store_t, 0x404066c8u)
 #define fw_text_bind   FW(fw_text_bind_t, 0x4040a1acu)
 #define fw_widget_show FW(fw_widget_show_t, 0x40409f74u)
-#define fw_switch_set  FW(fw_switch_set_t, 0x40534438u)
-#define fw_switch_apply FW(fw_switch_apply_t, 0x405342bcu)
 #define fw_entry_guard FW(fw_entry_guard_t, 0x403bf168u)
 #define fw_set_cursor  FW(fw_set_cursor_t, 0x403c0f8cu)
 #define fw_set_mark    FW(fw_set_mark_t, 0x403c0ffcu)
@@ -385,6 +301,11 @@ static inline void wr16(uint64_t address, uint16_t value)
     *(volatile uint16_t *)(uintptr_t)address = value;
 }
 
+static inline void wr32(uint64_t address, uint32_t value)
+{
+    *(volatile uint32_t *)(uintptr_t)address = value;
+}
+
 static inline void wr64(uint64_t address, uint64_t value)
 {
     *(volatile uint64_t *)(uintptr_t)address = value;
@@ -414,11 +335,6 @@ static inline uint32_t movk_x(uint32_t rd, uint32_t imm16, uint32_t shift)
 static inline uint32_t prores_grade(void)
 {
     return rd8(STORE_PRORES_GRADE) & 3u;
-}
-
-static inline uint32_t pre_raw_on(void)
-{
-    return rd8(STORE_PRE_RAW) & 1u;
 }
 
 #endif /* Z63FW_H */
