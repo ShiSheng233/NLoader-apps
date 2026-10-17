@@ -1,0 +1,11 @@
+{
+  "id": "platz6",
+  "kind": "foreground",
+  "display_name": "Other body",
+  "file": "APPS/PLATZ6.NLB",
+  "min_abi": 8,
+  "abi_version": 8,
+  "models": "z6iii/2.00",
+  "describe": true,
+  "description": { "role": "app", "summary": "Built for another body" }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "platbig",
+  "kind": "foreground",
+  "display_name": "Big reservation",
+  "file": "APPS/PLATBIG.NLB",
+  "min_abi": 8,
+  "abi_version": 8,
+  "models": "Z8/3.11",
+  "describe": true,
+  "description": { "role": "app", "memory": "1024M", "summary": "Asks for more than the heap has" }
+}
