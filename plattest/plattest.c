@@ -17,6 +17,7 @@
  *   entry <r> <value>                  gui.palette entry PLAT_ENTRY now
  *   write <r> <back> <flags>           a new colour there, read back
  *   stack <r> <back> <first>           a second entry on top (stacked)
+ *   journal <write> <update> <read>   LOADER.LOG: -EACCES, -EACCES, 0
  *   repack <read> <row0> <write> <restore>
  *                                      isp.lut1.nlog: readable, -EACCES,
  *                                      nothing to restore (-ENOENT)
@@ -144,6 +145,7 @@ int32_t nlr_app_main(const struct nlr_api *api)
     say(api, "run", 1, v);
     reserved(api);
     if (PLAT_VARIANT == 1) {
+        api->sleep_ms(2000); /* long enough for the fixture to see it run */
         log_line(api, "done\n", 5);
         return 0;
     }
@@ -211,6 +213,15 @@ int32_t nlr_app_main(const struct nlr_api *api)
     v[1] = back2;
     v[2] = back == PLAT_NEW;
     say(api, "stack", 3, v);
+
+    /* the loader's own log: readable, never opened for writing */
+    v[0] = api->fs_open("LOADER.LOG", NLR_OPEN_WRITE);
+    v[1] = api->fs_open("LOADER.LOG", NLR_OPEN_UPDATE);
+    int log_fd = api->fs_open("LOADER.LOG", NLR_OPEN_READ);
+    v[2] = log_fd >= 0 ? 0 : log_fd;
+    if (log_fd >= 0)
+        api->fs_close(log_fd);
+    say(api, "journal", 3, v);
 
     uint16_t row0 = 0, mark = 0x1234;
     v[0] = api->table_read("isp.lut1.nlog", 0, &row0, 2);
