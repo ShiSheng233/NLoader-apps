@@ -1,0 +1,16 @@
+{
+  "id": "prores",
+  "kind": "resource_extension",
+  "display_name": "ProRes grades",
+  "file": "APPS/PRORES.NLB",
+  "min_abi": 5,
+  "abi_version": 5,
+  "models": "z6iii/2.00",
+  "describe": true,
+  "description": {
+    "role": "extension",
+    "summary": "ProRes 422/LT/Proxy rows in the camera's own video menu",
+    "version": "0.1.0",
+    "uses": ["code:record_service", "code:menu_pages"]
+  }
+}

@@ -5,5 +5,12 @@
   "file": "APPS/LOG3G10.NLB",
   "min_abi": 5,
   "models": "Z6III/2.00",
-  "abi_version": 5
+  "abi_version": 5,
+  "describe": true,
+  "description": {
+    "role": "app",
+    "summary": "Log3G10 in place of N-Log: the switch and the curve",
+    "version": "2.0.0",
+    "uses": ["table:isp.lut1.nlog"]
+  }
 }
