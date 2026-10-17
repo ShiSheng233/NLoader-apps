@@ -3,6 +3,14 @@
 Records RED Log3G10 in place of N-Log: the camera's video tone mode
 **N-Log** uses a Log3G10 curve instead. Z 6III firmware 2.00 only.
 
+**Not for the Z 8 (checked 2026-10-17).** The programs write the N-Log rows
+of Lut1 through a RAM copy the Z 6III keeps, and check them against that
+firmware's CRC. The Z 8 3.11 has no RAM copy: its Lut1 rows stay in the
+flash image (`isp.lut1.nlog` is declared there as class `repack`, and
+`table_write` answers -EACCES, as `abi8test` shows in Z 8 QEMU). On the Z 8
+the curve can only come with a repacked firmware, which these programs do
+not do; their declarations keep `models` at `Z6III/2.00`.
+
 ## What it changes, and where the curve comes from
 
 The image pipeline turns scene-linear RGB into the recorded code through
