@@ -1,0 +1,15 @@
+{
+  "id": "uidemo",
+  "kind": "foreground",
+  "display_name": "UI demo",
+  "file": "APPS/UIDEMO.NLB",
+  "min_abi": 6,
+  "abi_version": 6,
+  "models": "z8/3.11",
+  "describe": true,
+  "description": {
+    "role": "app",
+    "summary": "Every kind of row the camera's menus draw, its keyboard and caution box",
+    "version": "1.0.0"
+  }
+}
