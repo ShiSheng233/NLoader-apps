@@ -7,8 +7,14 @@
  *   caps <platform_caps>
  *   claim <rear> <evf>                 screen_claim: -EBUSY (opened from the
  *                                      menu), -ENOSYS (EVF)
- *   absent <prop_set> <bus_i2c> <hook> each undeclared service: -ENOSYS,
- *                                      -ENOSYS, -ENOENT (no such point)
+ *   absent <prop_set> <bus_i2c> <hook> refusals: prop_set is declared on
+ *                                      the Z 8 C3.11 (scalar items), so its
+ *                                      write reaches the stock setter, which
+ *                                      refuses 0x07000510 = 0 (-EACCES; a body
+ *                                      without prop_set answers -ENOSYS);
+ *                                      bus_i2c undeclared (-ENOSYS); no such
+ *                                      point (-ENOENT). Z 8 QEMU log line:
+ *                                      "absent -13 -38 -2"
  *   present <card> <prop_get> <size> <timer> <event>
  *                                      declared ones work
  *   reserved <bytes> <ok>              mem_reserved: the declared memory,
