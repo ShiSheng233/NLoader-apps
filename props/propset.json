@@ -1,0 +1,8 @@
+{
+  "id": "propset",
+  "kind": "foreground",
+  "display_name": "Prop set",
+  "file": "APPS/PROPSET.NLB",
+  "min_abi": 7,
+  "models": "Z8/3.11"
+}
