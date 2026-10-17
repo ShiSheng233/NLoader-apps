@@ -36,9 +36,14 @@ primaries. The file's own tags still say N-Log.
 | `APPS/LOG3G10.CFG` | the switch, written by the page |
 | `APPS/LOG3G10.LOG` | what the extension did at the last start |
 
-Add the two lines `build.sh` prints into `MANIFEST.page` / `MANIFEST.start`
-to the card's `MANIFEST`, and `log3g10_start` to `ENABLED` (on the ABI 4
-loader the NLoader page did not save ENABLED itself).
+The two programs describe themselves: a loader with ABI 7 or later finds
+them in `APPS` with no `MANIFEST` line. Put `log3g10_start` in `ENABLED`
+(one id per line), or switch it on in NLoader -> Plugin settings.
+
+An older loader refuses a file that describes itself: build with `PLAIN=1`
+and add the two lines `build.sh` writes into `MANIFEST.page` /
+`MANIFEST.start` to the card's `MANIFEST` (on the ABI 4 loader the NLoader
+page did not save ENABLED itself either).
 
 ## Using it
 
@@ -136,6 +141,6 @@ library, no writable static data and no heap:
 With a loader that has the firmware by name, both programs use the profile's
 table `isp.lut1.nlog` (the three N-Log rows of Lut1 as one span) through
 table_read / table_write, and hold no address: the loader checks the stock
-CRC before the first write and keeps the stock rows. Built for ABI 5 still
-(abi_version 5), so the same files run on older loaders, where they fall back
-to the RAM address in log3g10.h.
+CRC before the first write and keeps the stock rows. The code asks for ABI 5
+only (abi_version 5): built with `PLAIN=1`, the same programs run on older
+loaders, where they fall back to the RAM address in log3g10.h.
