@@ -5,7 +5,7 @@
   "file": "APPS/SVCDEMO.NLB",
   "min_abi": 7,
   "abi_version": 7,
-  "models": "z6iii/2.00",
+  "models": "z6iii/2.00,z8/3.11",
   "describe": true,
   "description": { "role": "service", "summary": "A task of its own, logging every 2 s" }
 }
