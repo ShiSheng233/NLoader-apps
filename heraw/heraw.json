@@ -1,0 +1,16 @@
+{
+  "id": "heraw",
+  "kind": "resource_extension",
+  "display_name": "HE RAW for HSFC",
+  "file": "APPS/HERAW.NLB",
+  "min_abi": 7,
+  "abi_version": 7,
+  "models": "z6iii/2.00",
+  "describe": true,
+  "description": {
+    "role": "extension",
+    "summary": "High-speed frames (C15/C30/C60, pre-release too) saved as HE RAW NEFs",
+    "version": "0.1.0",
+    "uses": ["code:menu_pages", "code:card_writer", "code:ring_pool"]
+  }
+}
