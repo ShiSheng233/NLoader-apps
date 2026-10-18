@@ -1,9 +1,11 @@
 /*
- * The HE RAW option, in the camera's own menu.
+ * The HE RAW options, in the camera's own menu.
  *
  * PHOTO SHOOTING MENU > Image quality settings > Image quality (HSFC)
- * offers JPEG fine and JPEG normal. It gets a third row, HE RAW, the way
- * PRORES adds its rows: the menu engine builds a page from a page record
+ * offers JPEG fine and JPEG normal. It gets five more rows, HE RAW at 3.0,
+ * 4.0, 5.0, 6.0 and 7.0 bits per pixel (hsfc.c makes the ring keep that
+ * many), the way PRORES adds its rows: the menu engine builds a page from a
+ * page record
  * in .data that names the item records (44 bytes each), one event table per
  * row, and the row count, and finds rows by item id. So the program needs
  * no patched instruction here at all:
@@ -24,7 +26,12 @@
 #include "menu.h"
 #include "block.h"
 
-#define HSFC_TEXT "HE RAW"
+/* One label per tier, its text slot SLOT_HSFC_FIRST + tier - 1. */
+static const char TIER_LABEL[TIER_COUNT][16] = {
+    "HE RAW 3.0 bpp", "HE RAW 4.0 bpp", "HE RAW 5.0 bpp",
+    "HE RAW 6.0 bpp", "HE RAW 7.0 bpp",
+};
+static const uint32_t TIER_ITEM[TIER_COUNT] = ITEM_HSFC_TIERS;
 
 /* Records of an event table, terminator included. */
 static uint32_t table_len(uint64_t table)
@@ -48,13 +55,17 @@ static int slot_ready(uint32_t slot)
 
 int menu_slots_ready(void)
 {
-    return slot_ready(SLOT_HSFC_LABEL);
+    for (uint32_t n = 0; n < TIER_COUNT; n++)
+        if (!slot_ready(SLOT_HSFC_FIRST + n))
+            return 0;
+    return 1;
 }
 
 /* ---- the handlers ------------------------------------------------------- */
 
 /* The parent row's value: the camera's own, FINE or NORM, unless HE RAW is
- * chosen -- then RAW, the camera's own symbol for it. The value is a string
+ * chosen -- then RAW, the camera's own symbol for it, whatever the tier
+ * (the font has no digits to say which). The value is a string
  * of the image-quality symbol font; a text slot drawn there comes out as
  * other symbols. */
 static uint64_t quality_refresh(void *window)
@@ -69,22 +80,44 @@ static uint64_t quality_refresh(void *window)
 }
 
 /* The page's entry: the stock one puts the cursor and the radio mark on
- * fine or normal; with HE RAW chosen, the same two calls, on ours. */
+ * fine or normal; with HE RAW chosen, the same two calls, on the tier's
+ * row. */
 static uint64_t hsfc_entry(void *window)
 {
-    if (!he_raw_on())
+    uint32_t tier = he_raw_tier();
+    if (!tier)
         return FW(fw_handler_t, HSFC_ENTRY)(window);
+    uint32_t item = TIER_ITEM[tier - 1u];
     if (fw_entry_guard() != 1u)
-        fw_set_cursor(window, ITEM_HSFC_RAW);
-    return fw_set_mark(window, ITEM_HSFC_RAW, 1u);
+        fw_set_cursor(window, item);
+    return fw_set_mark(window, item, 1u);
 }
 
-/* OK on HE RAW. The JPEG setting stays as it was: the camera still makes
- * the JPEG, whose Exif, MakerNote and preview the NEF is built from. */
-static void pick_he_raw(struct fw_nav *nav)
+/* OK on an HE RAW row: an action of its own per row, since the action is
+ * told nothing about which row it was. The JPEG setting stays as it was:
+ * the camera still makes the JPEG, whose Exif, MakerNote and preview the
+ * NEF is built from. */
+#define PICK_TIER(n)                                \
+    static void pick_tier_##n(struct fw_nav *nav)   \
+    {                                               \
+        (void)nav;                                  \
+        wr8(STORE_HE_RAW, n);                       \
+    }
+PICK_TIER(1)
+PICK_TIER(2)
+PICK_TIER(3)
+PICK_TIER(4)
+PICK_TIER(5)
+
+static uint64_t pick_tier(uint32_t tier)
 {
-    (void)nav;
-    wr8(STORE_HE_RAW, 1u);
+    switch (tier) {
+    case 1: return (uint64_t)(uintptr_t)&pick_tier_1;
+    case 2: return (uint64_t)(uintptr_t)&pick_tier_2;
+    case 3: return (uint64_t)(uintptr_t)&pick_tier_3;
+    case 4: return (uint64_t)(uintptr_t)&pick_tier_4;
+    default: return (uint64_t)(uintptr_t)&pick_tier_5;
+    }
 }
 
 /* OK on JPEG fine or normal: HE RAW off, and the camera's own action. */
@@ -128,8 +161,8 @@ static void item_set(uint8_t *record, uint32_t at, uint32_t value)
 }
 
 /* The two stock rows on one copied table whose OK turns HE RAW off first,
- * and ours, cloned from "JPEG normal" with its label in a text slot, on a
- * copy whose OK turns it on. */
+ * and ours, each cloned from "JPEG normal" with its label in a text slot,
+ * on a copy of its own whose OK picks its tier. */
 static void hsfc_arrays(uint64_t block)
 {
     uint64_t stock_table = rd64(HSFC_EVPTRS);
@@ -138,10 +171,6 @@ static void hsfc_arrays(uint64_t block)
     copy_table(block + OFF_HSFC_JPEG, stock_table, records);
     replace_action(block + OFF_HSFC_JPEG, records, HSFC_PICK,
                    (uint64_t)(uintptr_t)&pick_jpeg);
-    copy_table(block + OFF_HSFC_RAW, stock_table, records);
-    replace_action(block + OFF_HSFC_RAW, records, HSFC_PICK,
-                   (uint64_t)(uintptr_t)&pick_he_raw);
-    refuse_my_menu(block + OFF_HSFC_RAW, records);
 
     for (uint32_t row = 0; row < HSFC_ROWS; row++) {
         block_copy_fw(block + OFF_HSFC_ITEMS + row * ITEM_BYTES,
@@ -149,16 +178,25 @@ static void hsfc_arrays(uint64_t block)
         wr64(block + OFF_HSFC_EVPTRS + row * 8u, block + OFF_HSFC_JPEG);
     }
     uint64_t anchor = HSFC_ITEMS + (HSFC_ROWS - 1u) * ITEM_BYTES;
-    uint8_t record[ITEM_BYTES];
-    for (uint32_t n = 0; n < ITEM_BYTES; n++)
-        record[n] = rd8(anchor + n);
-    item_set(record, ITEM_LABEL, SLOT_HSFC_LABEL);
-    item_set(record, ITEM_FLAGS, rd32(anchor + ITEM_FLAGS) | FLAGS_LABEL_SLOT);
-    item_set(record, ITEM_ID, ITEM_HSFC_RAW);
-    uint64_t ours = block + OFF_HSFC_ITEMS + HSFC_ROWS * ITEM_BYTES;
-    for (uint32_t n = 0; n < ITEM_BYTES; n++)
-        wr8(ours + n, record[n]);
-    wr64(block + OFF_HSFC_EVPTRS + HSFC_ROWS * 8u, block + OFF_HSFC_RAW);
+    for (uint32_t tier = 1; tier <= TIER_COUNT; tier++) {
+        uint64_t table = block + OFF_HSFC_RAW + (tier - 1u) * HSFC_TABLE_BYTES;
+        copy_table(table, stock_table, records);
+        replace_action(table, records, HSFC_PICK, pick_tier(tier));
+        refuse_my_menu(table, records);
+
+        uint8_t record[ITEM_BYTES];
+        for (uint32_t n = 0; n < ITEM_BYTES; n++)
+            record[n] = rd8(anchor + n);
+        item_set(record, ITEM_LABEL, SLOT_HSFC_FIRST + tier - 1u);
+        item_set(record, ITEM_FLAGS,
+                 rd32(anchor + ITEM_FLAGS) | FLAGS_LABEL_SLOT);
+        item_set(record, ITEM_ID, TIER_ITEM[tier - 1u]);
+        uint32_t row = HSFC_ROWS + tier - 1u;
+        uint64_t ours = block + OFF_HSFC_ITEMS + row * ITEM_BYTES;
+        for (uint32_t n = 0; n < ITEM_BYTES; n++)
+            wr8(ours + n, record[n]);
+        wr64(block + OFF_HSFC_EVPTRS + row * 8u, table);
+    }
 }
 
 /* ---- the fingerprint ---------------------------------------------------- */
@@ -201,7 +239,8 @@ int menu_install(uint64_t block)
 {
     /* The text first: a row built before its slot was written would draw
      * whatever the slot held. */
-    fw_text_store(HSFC_TEXT, SLOT_HSFC_LABEL, TEXT_STYLE_LABEL);
+    for (uint32_t n = 0; n < TIER_COUNT; n++)
+        fw_text_store(TIER_LABEL[n], SLOT_HSFC_FIRST + n, TEXT_STYLE_LABEL);
     hsfc_arrays(block);
 
     /* Now the .data words the engine reads: the arrays before the count,
@@ -209,7 +248,7 @@ int menu_install(uint64_t block)
      * same page it always did, out of copies of its own records. */
     wr64(HSFC_PAGE + PAGE_ITEMS, block + OFF_HSFC_ITEMS);
     wr64(HSFC_PAGE + PAGE_EVPTRS, block + OFF_HSFC_EVPTRS);
-    wr16(HSFC_PAGE + PAGE_COUNT, (uint16_t)(HSFC_ROWS + 1u));
+    wr16(HSFC_PAGE + PAGE_COUNT, (uint16_t)(HSFC_ROWS + TIER_COUNT));
 
     wr64(HSFC_HANDLERS, (uint64_t)(uintptr_t)&hsfc_entry);
     wr64(QUALITY_HANDLERS + 4u * 8u, (uint64_t)(uintptr_t)&quality_refresh);

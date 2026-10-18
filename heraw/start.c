@@ -2,19 +2,20 @@
  * HERAW (resource extension, ABI 7).
  *
  * Runs once per boot, as early as NLoader starts its extensions. It gives
- * the camera's own menu one more option,
+ * the camera's own menu five more options,
  *
  *   PHOTO SHOOTING MENU > Image quality settings > Image quality (HSFC):
- *       JPEG fine | JPEG normal | HE RAW
+ *       JPEG fine | JPEG normal | HE RAW 3.0 bpp | ... | HE RAW 7.0 bpp
  *
- * and with HE RAW chosen, every high-speed frame (C15/C30/C60, pre-release
- * included) goes to the card as a NEF of the ring's own HE RAW, written by
- * the camera's own writer under the camera's own name, instead of its JPEG
- * (hsfc.c, nef.c). The choice is a padding byte of the camera's settings
- * store, saved with the shooting bank. See README.md.
+ * and with an HE RAW row chosen, every high-speed frame (C15/C30/C60/C120,
+ * pre-release included) goes to the card as a NEF of the ring's own HE
+ * RAW, kept at that many bits per pixel, written by the camera's own writer
+ * under the camera's own name, instead of its JPEG (hsfc.c, nef.c). The
+ * choice is a padding byte of the camera's settings store, saved with the
+ * shooting bank. See README.md.
  *
  * It refuses, with the camera left exactly as it was, when the firmware is
- * not the one it knows, when the camera has no block to spare, or when the
+ * not the one it knows, when the camera has no block to spare, or when a
  * row's text slot has no buffer. A refusal returns 0: a failing extension
  * holds NLoader's interruption marker and pauses the next start, which is
  * not what "this firmware is not mine" deserves.
@@ -119,7 +120,7 @@ int32_t nlr_extension_init(const struct nlr_api *api)
     if (!hsfc_fingerprint())
         return refuse(api, &l, "not the firmware this build knows (hooks)");
     if (!menu_slots_ready())
-        return refuse(api, &l, "no text slot for the row");
+        return refuse(api, &l, "no text slot for the rows");
 
     /* The one allocation, taken before anything is installed: it stays for
      * the boot, as this program's code does. */
@@ -133,14 +134,19 @@ int32_t nlr_extension_init(const struct nlr_api *api)
     if (result != 0) {
         /* The row is there and does nothing; the hooks that did attach do
          * nothing either until a frame is recorded, which needs them all. */
-        put(&l, "HE RAW row added, hooks failed (");
+        put(&l, "HE RAW rows added, hooks failed (");
         put_int(&l, result);
         put(&l, ")");
         record(api, &l);
         return 0;
     }
-    put(&l, "HE RAW row added, ");
-    put(&l, he_raw_on() ? "on" : "off");
+    put(&l, "HE RAW rows added, ");
+    if (he_raw_on()) {
+        put(&l, "tier ");
+        put_int(&l, (int32_t)he_raw_tier());
+    } else {
+        put(&l, "off");
+    }
     if (hsfc_tests()) {
         put(&l, "; HERAW.CFG ");
         put_int(&l, (int32_t)hsfc_tests());

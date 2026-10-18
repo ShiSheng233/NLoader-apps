@@ -265,8 +265,10 @@ static uint16_t crc16(struct writer *w, uint32_t at, uint32_t bytes)
 }
 
 /* The 0xC7D5 block at `at`: the template, this frame's white balance,
- * black level, crop and (when known) colour temperature written into it,
- * and every field's CRC done again. */
+ * black level, crop, strip size and (when known) colour temperature
+ * written into it, and every field's CRC done again. Field 0x0F holds the
+ * strip's bytes (9,186,816 in every FX HE frame, the same value as the
+ * MakerNote's 0x58): a strip at a tier above HE is larger. */
 static void c7d5_block(struct writer *w, uint32_t at,
                        const struct nef_source *src, uint64_t wb,
                        uint32_t temperature)
@@ -295,6 +297,8 @@ static void c7d5_block(struct writer *w, uint32_t at,
             put16(w, value + 8u, (uint16_t)(src->width - 16u));
             put16(w, value + 10u, (uint16_t)(src->height - 8u));
         }
+        if (tag == 0x0fu && bytes >= 14u)
+            put32(w, value + 4u, src->payload_bytes);
         if (tag == 0x10u && bytes >= 8u && temperature)
             put16(w, value + 4u, (uint16_t)temperature);
         put16(w, value + bytes - 2u, crc16(w, value, bytes - 2u));

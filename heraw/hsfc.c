@@ -6,7 +6,8 @@
  * The camera keeps every high-speed frame in a pool-63 ring slot as
  * TicoRAW HE (3.0 bpp: FX 9,186,816 bytes, byte for byte the format of the
  * strip of its own high-efficiency NEF), decodes it for the JPEG, and lets
- * the slot go. Three hooks, all through the loader's code channel:
+ * the slot go. Three hooks, all through the loader's code channel, make the
+ * NEFs:
  *
  *   - the drain's submit (sub_40F7F1B0), which hands each frame to the
  *     pipeline: a record of the frame -- its request, metadata block, ring
@@ -20,8 +21,18 @@
  *
  * The NEF is the camera's own writer's work: its name, folder, timestamp
  * and index entry. A frame whose NEF cannot be written goes out as its
- * JPEG, so no frame is lost. README.md and NOTES.md say how each of these
- * was found.
+ * JPEG, so no frame is lost.
+ *
+ * Two more set how many bits the ring keeps, for the tiers above HE
+ * (z63fw.h has the chain):
+ *
+ *   - the ring allocation (sub_40E6C0C4) when a lane start calls it: on the
+ *     high-speed lane, the slot sizes and the TENC rate index of the tier,
+ *     before the ring is allocated and TENC set up;
+ *   - the TDEC set-up (loc_40E67250), when the high-speed stage calls it:
+ *     TDEC decodes at that rate.
+ *
+ * README.md and NOTES.md say how each of these was found.
  */
 #include "hsfc.h"
 #include "nef.h"
@@ -60,6 +71,14 @@ struct heraw_state {
     uint32_t last_alt;
     uint32_t last_types;
     uint32_t last_to_write;
+    uint32_t index;         /* the ring's rate index this lane, 0 before one */
+    uint32_t lanes;         /* high-speed lane starts */
+    uint32_t waits;         /* lane starts a new tier had to wait past */
+    uint32_t tdec_rated;    /* TDEC set-ups given a tier's index */
+    uint32_t ring_beat;     /* submits, ring frees, ring TDEC set-ups */
+    uint32_t ring_quiet;    /* the task's polls since ring_beat moved */
+    uint32_t slot_fx;       /* the slot sizes the last lane start set */
+    uint32_t slot_dx;
 };
 _Static_assert(sizeof(struct heraw_state) <= STATE_MAX,
                "the state outgrew its room in the block");
@@ -81,6 +100,7 @@ struct frame_rec {
     uint32_t written_order; /* the writer's count */
     uint32_t kept;          /* 1: the slot is ours to give back */
     uint32_t kept_ms;       /* when the program's task first saw it kept */
+    uint32_t index;         /* the rate index it was compressed at */
 };
 #define FRAME_FREE      0u
 #define FRAME_RECORDED  1u
@@ -102,6 +122,34 @@ static volatile struct heraw_state *state_of(void)
 static int active(volatile struct heraw_state *state)
 {
     return he_raw_on() || (state->tests & TEST_EMULATE);
+}
+
+/* ---- the ring's rate ---------------------------------------------------- */
+
+/* TENC's output for a readout at a rate index: what the camera computes
+ * (sub_40E67CFC), so what a slot holds. */
+static uint32_t payload_bytes(uint32_t index, uint32_t width, uint32_t height)
+{
+    uint64_t rate = rd32(TENC_RATES + index * 4u);
+    return (uint32_t)((rate * width * height / 80u) & ~511ull);
+}
+
+/* The index the ring of the running (or last) high-speed lane keeps. */
+static uint32_t ring_index(volatile struct heraw_state *state)
+{
+    uint32_t index = state ? state->index : 0u;
+    return index && index < RATE_COUNT ? index : HE_INDEX;
+}
+
+/* A slot for a tier: the stock slot's room past its HE frame, past the
+ * tier's frame instead. */
+static uint32_t slot_bytes(uint32_t index, uint32_t stock, uint32_t width,
+                           uint32_t height)
+{
+    if (index == HE_INDEX)
+        return stock;
+    return payload_bytes(index, width, height) +
+           (stock - payload_bytes(HE_INDEX, width, height));
 }
 
 /* ---- the frame records -------------------------------------------------- */
@@ -159,7 +207,8 @@ static void record_frame(uint64_t r)
     f->m = m;
     f->e = e;
     f->payload = payload;
-    f->bytes = (uint32_t)(((uint64_t)HE_RATE * width * height / 80u) & ~511ull);
+    f->index = ring_index(state);
+    f->bytes = payload_bytes(f->index, width, height);
     f->width = (uint16_t)width;
     f->height = (uint16_t)height;
     for (uint32_t k = 0; k < 4u; k++)
@@ -532,9 +581,12 @@ static int nef_for_jpeg(uint64_t card, uint64_t object)
 static int keep_slot(uint64_t slot)
 {
     volatile struct heraw_state *state = state_of();
-    if (!state || !slot || !he_raw_on())
+    if (!state || !slot)
         return 0;
     if (rd32(slot + SLOT_POOL) != RING_POOL)
+        return 0;
+    state->ring_beat++;
+    if (!he_raw_on())
         return 0;
     uint64_t block = plugin_block();
     state->ring_frees++;
@@ -585,8 +637,103 @@ typedef uint64_t (*submit_t)(uint64_t r, uint32_t flag);
 
 static uint64_t submit_hook(uint64_t r, uint32_t flag)
 {
+    volatile struct heraw_state *state = state_of();
+    if (state)
+        state->ring_beat++;
     record_frame(r);
     return ((submit_t)(void *)&submit_original)(r, flag);
+}
+
+/* Nothing of a ring is in flight: no frame waiting for its NEF, no slot
+ * kept, and no submit, ring free or ring TDEC set-up for a second (or none
+ * at all since the program started). Then no slot of the old size holds a
+ * frame still to be decoded or written, and a new rate can take over. */
+static int ring_idle(volatile struct heraw_state *state, uint64_t block)
+{
+    if (state->ring_beat && state->ring_quiet < 2u)
+        return 0;
+    for (uint32_t n = 0; n < FRAME_MAX; n++) {
+        volatile struct frame_rec *f = frame_at(block, n);
+        if (f->kept || f->state == FRAME_RECORDED ||
+            f->state == FRAME_WRITING)
+            return 0;
+    }
+    return 1;
+}
+
+/* A capture lane is starting (the lane block in x0): its rate index is
+ * latched, its ring not yet allocated nor TENC set up. On the high-speed
+ * lane, the slots and the rate index of the chosen tier -- the camera's own
+ * for HE or JPEG. A tier chosen while a ring is still in flight waits for
+ * a later lane start; until then the lane keeps the rate it had, so every
+ * frame is decoded and written at the rate it was compressed at. */
+static void lane_started(uint64_t lane)
+{
+    volatile struct heraw_state *state = state_of();
+    uint64_t block = plugin_block();
+    if (!state || !block || rd32(lane + LANE_TYPE) != HSFC_LANE)
+        return;
+    uint32_t index = ring_index(state);
+    uint32_t want = tier_index(he_raw_tier());
+    if (want != index) {
+        if (ring_idle(state, block))
+            index = want;
+        else
+            state->waits++;
+    }
+    uint32_t fx = slot_bytes(index, SLOT_FX_STOCK, FX_WIDTH, FX_HEIGHT);
+    uint32_t dx = slot_bytes(index, SLOT_DX_STOCK, DX_WIDTH, DX_HEIGHT);
+    for (uint32_t mode = 0; mode < SLOT_MODES; mode++)
+        wr32(SLOT_SIZES + mode * 4u, mode == 1u ? dx : fx);
+    wr32(TENC_INDEX, index);
+    state->index = index;
+    state->slot_fx = fx;
+    state->slot_dx = dx;
+    state->lanes++;
+    state->activity++;
+}
+
+NLR_HOOK_CONTINUE(alloc_original, RING_ALLOC_SITE,
+                  RING_ALLOC_STOCK_0, RING_ALLOC_STOCK_1,
+                  RING_ALLOC_STOCK_2, RING_ALLOC_STOCK_3)
+
+typedef uint64_t (*ring_alloc_t)(uint64_t lane, uint64_t count);
+
+/* The ring allocation: from a lane start, the tier goes in first; from the
+ * frame-by-frame top-up, nothing changes. */
+static uint64_t alloc_hook(uint64_t lane, uint64_t count)
+{
+    uint64_t caller = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    if (lane && (caller == LANE_ALLOC_CALL_A + 4u ||
+                 caller == LANE_ALLOC_CALL_B + 4u))
+        lane_started(lane);
+    return ((ring_alloc_t)(void *)&alloc_original)(lane, count);
+}
+
+NLR_HOOK_CONTINUE(tdec_original, TDEC_SETUP_SITE,
+                  TDEC_SETUP_STOCK_0, TDEC_SETUP_STOCK_1,
+                  TDEC_SETUP_STOCK_2, TDEC_SETUP_STOCK_3)
+
+typedef uint64_t (*tdec_setup_t)(uint64_t cfg, uint64_t flag);
+
+/* TDEC is about to be set up from the block in x0. Called back from the
+ * high-speed TDEC stage -- the detour is a branch, so the link register
+ * still says who called -- the block carries the index 2 the stage wrote
+ * as an immediate: for a tier above HE, the ring's index instead. Every
+ * other TDEC set-up goes through untouched. */
+static uint64_t tdec_hook(uint64_t cfg, uint64_t flag)
+{
+    uint64_t caller = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    volatile struct heraw_state *state = state_of();
+    if (state && caller == TDEC_RING_RETURN && cfg) {
+        state->ring_beat++;
+        uint32_t index = ring_index(state);
+        if (index != HE_INDEX && rd32(cfg + TDEC_CFG_INDEX) == HE_INDEX) {
+            wr32(cfg + TDEC_CFG_INDEX, index);
+            state->tdec_rated++;
+        }
+    }
+    return ((tdec_setup_t)(void *)&tdec_original)(cfg, flag);
 }
 
 /* ---- the program's own task --------------------------------------------- */
@@ -688,8 +835,20 @@ static void write_note(const struct nlr_api *api,
     note_session(state);
     note_put(&n, "heraw\nsession ");
     note_dec(&n, (int32_t)state->session);
-    note_put(&n, "\nHE RAW ");
-    note_put(&n, he_raw_on() ? "on" : "off");
+    note_put(&n, "\nHE RAW tier ");
+    note_dec(&n, (int32_t)he_raw_tier());
+    note_put(&n, ", ring index ");
+    note_dec(&n, (int32_t)state->index);
+    note_put(&n, " (lanes ");
+    note_dec(&n, (int32_t)state->lanes);
+    note_put(&n, ", waited ");
+    note_dec(&n, (int32_t)state->waits);
+    note_put(&n, ", TDEC at the tier's rate ");
+    note_dec(&n, (int32_t)state->tdec_rated);
+    note_put(&n, "), slots ");
+    note_hex(&n, state->slot_fx, 8);
+    note_put(&n, "/");
+    note_hex(&n, state->slot_dx, 8);
     note_put(&n, ", tests ");
     note_dec(&n, (int32_t)state->tests);
     note_put(&n, "\nframes ");
@@ -728,9 +887,10 @@ static void write_note(const struct nlr_api *api,
     note_hex(&n, state->last_types, 4);
     note_put(&n, "/");
     note_hex(&n, state->last_to_write, 4);
-    /* Per frame, the newest 64: drain order, burst sequence, result (0
-     * written, 100 slot gone, - error, ? never reached the writer). */
-    note_put(&n, "\nframes (order:sequence:result)");
+    /* Per frame, the newest 64: drain order, burst sequence, rate index,
+     * result (0 written, 100 slot gone, - error, ? never reached the
+     * writer). */
+    note_put(&n, "\nframes (order:sequence:index:result)");
     uint64_t block = plugin_block();
     uint32_t first = state->frames > 64u ? state->frames - 64u : 0u;
     for (uint32_t order = first, k = 0; order < state->frames; order++, k++) {
@@ -741,6 +901,8 @@ static void write_note(const struct nlr_api *api,
         note_dec(&n, (int32_t)f->order);
         note_put(&n, ":");
         note_dec(&n, (int32_t)f->sequence);
+        note_put(&n, ":");
+        note_dec(&n, (int32_t)f->index);
         note_put(&n, ":");
         if (f->state == FRAME_DONE)
             note_dec(&n, f->result);
@@ -780,11 +942,18 @@ static void heraw_task(void *arg)
     volatile struct heraw_state *state = state_of();
     if (!state)
         return;
-    uint32_t quiet_mark = 0, quiet_polls = 0;
+    uint32_t quiet_mark = 0, quiet_polls = 0, beat_mark = 0;
     for (;;) {
         api->sleep_ms(500);
         uint64_t block = plugin_block();
         uint32_t now_ms = api->time_ms();
+        uint32_t beat = state->ring_beat;
+        if (beat != beat_mark) {
+            beat_mark = beat;
+            state->ring_quiet = 0;
+        } else if (state->ring_quiet < 1000u) {
+            state->ring_quiet++;
+        }
         for (uint32_t k = 0; k < FRAME_MAX; k++) {
             volatile struct frame_rec *f = frame_at(block, k);
             if (!f->kept || f->state != FRAME_RECORDED)
@@ -875,11 +1044,47 @@ static const uint32_t POOL_EXPECT[4] = {
     POOL_FREE_STOCK_3
 };
 
+static const uint32_t ALLOC_EXPECT[4] = {
+    RING_ALLOC_STOCK_0, RING_ALLOC_STOCK_1, RING_ALLOC_STOCK_2,
+    RING_ALLOC_STOCK_3
+};
+static const uint32_t TDEC_EXPECT[4] = {
+    TDEC_SETUP_STOCK_0, TDEC_SETUP_STOCK_1, TDEC_SETUP_STOCK_2,
+    TDEC_SETUP_STOCK_3
+};
+static const uint32_t RATES_EXPECT[RATE_COUNT] = {
+    10u, 20u, 30u, 40u, 50u, 60u, 70u, 15u, 25u
+};
+
+/* The rate chain of z63fw.h as this build knows it: both tables, the two
+ * places that pick index 2, the calls the hooks know their callers by --
+ * each lane start latching before it allocates -- and the stock slots. */
+static int rates_fingerprint(void)
+{
+    for (uint32_t n = 0; n < RATE_COUNT; n++)
+        if (rd32(TENC_RATES + n * 4u) != RATES_EXPECT[n] ||
+            rd32(TDEC_RATES + n * 4u) != RATES_EXPECT[n])
+            return 0;
+    for (uint32_t mode = 0; mode < SLOT_MODES; mode++)
+        if (rd32(SLOT_SIZES + mode * 4u) !=
+            (mode == 1u ? SLOT_DX_STOCK : SLOT_FX_STOCK))
+            return 0;
+    return rd32(LANE_INDEX_SITE) == LANE_INDEX_STOCK &&
+           rd32(TDEC_INDEX_SITE) == TDEC_INDEX_STOCK &&
+           rd32(TDEC_RING_CALL) == TDEC_RING_CALL_STOCK &&
+           rd32(LANE_LATCH_CALL_A) == LANE_LATCH_A_STOCK &&
+           rd32(LANE_ALLOC_CALL_A) == LANE_ALLOC_A_STOCK &&
+           rd32(LANE_LATCH_CALL_B) == LANE_LATCH_B_STOCK &&
+           rd32(LANE_ALLOC_CALL_B) == LANE_ALLOC_B_STOCK &&
+           site_is(RING_ALLOC_SITE, ALLOC_EXPECT) &&
+           site_is(TDEC_SETUP_SITE, TDEC_EXPECT);
+}
+
 int hsfc_fingerprint(void)
 {
     return site_is(SUBMIT_SITE, SUBMIT_EXPECT) &&
            site_is(WRITE_FILE_SITE, WRITE_EXPECT) &&
-           site_is(POOL_FREE_SITE, POOL_EXPECT);
+           site_is(POOL_FREE_SITE, POOL_EXPECT) && rates_fingerprint();
 }
 
 int hsfc_install(const struct nlr_api *api, uint64_t block)
@@ -898,9 +1103,10 @@ int hsfc_install(const struct nlr_api *api, uint64_t block)
         return -NLR_API_EBUSY;
     /* The pool free first: it keeps nothing until a frame is recorded, and
      * a frame recorded with no one to keep its slot would only lose it. The
-     * writer next, the submit last. HE RAW can be chosen at any time, so all
-     * three stay attached; until then each lets the camera through after
-     * one load. */
+     * writer next; then TDEC before the lane start, so no lane gets a
+     * tier's rate that its decode would not follow; the submit last. HE RAW
+     * can be chosen at any time, so all five stay attached; until then each
+     * lets the camera through after a load or two. */
     int result = api->code_hook((void *)(uintptr_t)POOL_FREE_SITE, POOL_EXPECT,
                                 (void *)&pool_free_hook);
     state->hook_pool = result;
@@ -908,6 +1114,14 @@ int hsfc_install(const struct nlr_api *api, uint64_t block)
         return result;
     result = api->code_hook((void *)(uintptr_t)WRITE_FILE_SITE, WRITE_EXPECT,
                             (void *)&write_hook);
+    if (result != 0)
+        return result;
+    result = api->code_hook((void *)(uintptr_t)TDEC_SETUP_SITE, TDEC_EXPECT,
+                            (void *)&tdec_hook);
+    if (result != 0)
+        return result;
+    result = api->code_hook((void *)(uintptr_t)RING_ALLOC_SITE, ALLOC_EXPECT,
+                            (void *)&alloc_hook);
     if (result != 0)
         return result;
     return api->code_hook((void *)(uintptr_t)SUBMIT_SITE, SUBMIT_EXPECT,
