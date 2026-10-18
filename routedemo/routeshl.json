@@ -1,0 +1,9 @@
+{
+  "id": "routeshl",
+  "kind": "foreground",
+  "display_name": "Route shell",
+  "file": "APPS/ROUTESHL.NLB",
+  "min_abi": 7,
+  "models": "Z8/3.11",
+  "description": { "role": "shell", "summary": "Logs the routes of a shell's controls" }
+}

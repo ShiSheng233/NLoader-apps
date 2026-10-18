@@ -1,0 +1,11 @@
+{
+  "id": "plattest",
+  "kind": "foreground",
+  "display_name": "Platform test",
+  "file": "APPS/PLATTEST.NLB",
+  "min_abi": 8,
+  "abi_version": 8,
+  "models": "Z8/3.11",
+  "describe": true,
+  "description": { "role": "app", "memory": "1M", "summary": "Refusals, caps and named tables" }
+}

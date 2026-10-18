@@ -1,0 +1,9 @@
+{
+  "id": "scrdemo",
+  "kind": "foreground",
+  "display_name": "Screen demo",
+  "file": "APPS/SCRDEMO.NLB",
+  "min_abi": 7,
+  "models": "Z8/3.11",
+  "description": { "role": "shell", "summary": "Claims, draws and releases the rear screen" }
+}

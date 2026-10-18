@@ -1,0 +1,8 @@
+{
+  "id": "bootdemo",
+  "kind": "foreground",
+  "display_name": "Boot demo",
+  "file": "APPS/BOOTDEMO.NLB",
+  "min_abi": 5,
+  "models": "Z8/3.11"
+}

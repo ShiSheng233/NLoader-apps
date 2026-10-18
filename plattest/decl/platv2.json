@@ -1,0 +1,9 @@
+{
+  "id": "platv2",
+  "kind": "foreground",
+  "display_name": "Platform v2",
+  "file": "APPS/PLATV2.NLB",
+  "min_abi": 8,
+  "abi_version": 8,
+  "models": "Z8/3.11"
+}
