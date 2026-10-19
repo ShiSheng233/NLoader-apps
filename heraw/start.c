@@ -98,7 +98,8 @@ static int32_t refuse(const struct nlr_api *api, struct line *l,
 
 int32_t nlr_extension_init(const struct nlr_api *api)
 {
-    if (!api || api->abi < 7u || !api->code_hook || !api->task_start)
+    if (!api || api->abi < 7u || !api->code_hook || !api->code_unhook ||
+        !api->task_start)
         return -NLR_API_ENOSYS;
 
     struct line l;
@@ -132,13 +133,18 @@ int32_t nlr_extension_init(const struct nlr_api *api)
     menu_install((uint64_t)(uintptr_t)block);
     int result = hsfc_install(api, (uint64_t)(uintptr_t)block);
     if (result != 0) {
-        /* The row is there and does nothing; the hooks that did attach do
-         * nothing either until a frame is recorded, which needs them all. */
-        put(&l, "HE RAW rows added, hooks failed (");
+        /* Any hook installed before the failure is dormant and has been
+         * restored where possible. Remove the custom rows as well. */
+        int32_t rollback = hsfc_rollback_status();
+        int menu_result = menu_uninstall();
+        put(&l, "HE RAW install failed (");
         put_int(&l, result);
-        put(&l, ")");
+        put(&l, "), rollback ");
+        put_int(&l, rollback);
+        put(&l, ", menu ");
+        put_int(&l, menu_result);
         record(api, &l);
-        return 0;
+        return result;
     }
     put(&l, "HE RAW rows added, ");
     if (he_raw_on()) {

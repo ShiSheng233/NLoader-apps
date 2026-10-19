@@ -12,4 +12,7 @@ int menu_slots_ready(void);
 /* Put the HE RAW rows in place, their tables in `block`. 0. */
 int menu_install(uint64_t block);
 
+/* Restore the stock page and handlers after a failed feature install. */
+int menu_uninstall(void);
+
 #endif /* MENU_H */

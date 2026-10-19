@@ -6,8 +6,8 @@
  * The camera keeps every high-speed frame in a pool-63 ring slot as
  * TicoRAW HE (3.0 bpp: FX 9,186,816 bytes, byte for byte the format of the
  * strip of its own high-efficiency NEF), decodes it for the JPEG, and lets
- * the slot go. Three hooks, all through the loader's code channel, make the
- * NEFs:
+ * the slot go. Three of the five hooks, all through the loader's code
+ * channel, make the NEFs:
  *
  *   - the drain's submit (sub_40F7F1B0), which hands each frame to the
  *     pipeline: a record of the frame -- its request, metadata block, ring
@@ -35,6 +35,7 @@
  * README.md and NOTES.md say how each of these was found.
  */
 #include "hsfc.h"
+#include "install.h"
 #include "nef.h"
 
 #define APPS_DIR   "A:\\NLOADER\\APPS\\"
@@ -49,6 +50,7 @@
 
 /* What the hooks keep, in the block. */
 struct heraw_state {
+    struct heraw_install_state install;
     uint32_t tests;
     uint32_t session;       /* the note's number this power-on */
     uint32_t frames;        /* recorded by the submit hook */
@@ -121,7 +123,9 @@ static volatile struct heraw_state *state_of(void)
 /* The frames become NEFs: HE RAW chosen, or the emulator's test. */
 static int active(volatile struct heraw_state *state)
 {
-    return he_raw_on() || (state->tests & TEST_EMULATE);
+    return state && __atomic_load_n((uint32_t *)&state->install.ready,
+                                    __ATOMIC_ACQUIRE) &&
+           (he_raw_on() || (state->tests & TEST_EMULATE));
 }
 
 /* ---- the ring's rate ---------------------------------------------------- */
@@ -186,7 +190,9 @@ static void frame_release(volatile struct frame_rec *f, volatile uint32_t *count
 static void record_frame(uint64_t r)
 {
     volatile struct heraw_state *state = state_of();
-    if (!state || !he_raw_on() || !r)
+    if (!state || !__atomic_load_n((uint32_t *)&state->install.ready,
+                                   __ATOMIC_ACQUIRE) ||
+        !he_raw_on() || !r)
         return;
     uint64_t e = rd64(r + R_SLOT_E), m = rd64(r + R_SLOT_M);
     if (!e || !m)
@@ -581,7 +587,8 @@ static int nef_for_jpeg(uint64_t card, uint64_t object)
 static int keep_slot(uint64_t slot)
 {
     volatile struct heraw_state *state = state_of();
-    if (!state || !slot)
+    if (!state || !__atomic_load_n((uint32_t *)&state->install.ready,
+                                   __ATOMIC_ACQUIRE) || !slot)
         return 0;
     if (rd32(slot + SLOT_POOL) != RING_POOL)
         return 0;
@@ -638,7 +645,8 @@ typedef uint64_t (*submit_t)(uint64_t r, uint32_t flag);
 static uint64_t submit_hook(uint64_t r, uint32_t flag)
 {
     volatile struct heraw_state *state = state_of();
-    if (state)
+    if (state && __atomic_load_n((uint32_t *)&state->install.ready,
+                                 __ATOMIC_ACQUIRE))
         state->ring_beat++;
     record_frame(r);
     return ((submit_t)(void *)&submit_original)(r, flag);
@@ -671,7 +679,9 @@ static void lane_started(uint64_t lane)
 {
     volatile struct heraw_state *state = state_of();
     uint64_t block = plugin_block();
-    if (!state || !block || rd32(lane + LANE_TYPE) != HSFC_LANE)
+    if (!state || !__atomic_load_n((uint32_t *)&state->install.ready,
+                                   __ATOMIC_ACQUIRE) ||
+        !block || rd32(lane + LANE_TYPE) != HSFC_LANE)
         return;
     uint32_t index = ring_index(state);
     uint32_t want = tier_index(he_raw_tier());
@@ -725,7 +735,9 @@ static uint64_t tdec_hook(uint64_t cfg, uint64_t flag)
 {
     uint64_t caller = (uint64_t)(uintptr_t)__builtin_return_address(0);
     volatile struct heraw_state *state = state_of();
-    if (state && caller == TDEC_RING_RETURN && cfg) {
+    if (state && __atomic_load_n((uint32_t *)&state->install.ready,
+                                 __ATOMIC_ACQUIRE) &&
+        caller == TDEC_RING_RETURN && cfg) {
         state->ring_beat++;
         uint32_t index = ring_index(state);
         if (index != HE_INDEX && rd32(cfg + TDEC_CFG_INDEX) == HE_INDEX) {
@@ -945,6 +957,12 @@ static void heraw_task(void *arg)
     uint32_t quiet_mark = 0, quiet_polls = 0, beat_mark = 0;
     for (;;) {
         api->sleep_ms(500);
+        if (__atomic_load_n((uint32_t *)&state->install.stop,
+                            __ATOMIC_ACQUIRE))
+            return;
+        if (!__atomic_load_n((uint32_t *)&state->install.ready,
+                             __ATOMIC_ACQUIRE))
+            continue;
         uint64_t block = plugin_block();
         uint32_t now_ms = api->time_ms();
         uint32_t beat = state->ring_beat;
@@ -1024,6 +1042,19 @@ uint32_t hsfc_tests(void)
     return state ? state->tests : 0u;
 }
 
+int32_t hsfc_rollback_status(void)
+{
+    volatile struct heraw_state *state = state_of();
+    return state ? state->install.rollback : -NLR_API_EIO;
+}
+
+int hsfc_ready(void)
+{
+    volatile struct heraw_state *state = state_of();
+    return state && __atomic_load_n((uint32_t *)&state->install.ready,
+                                    __ATOMIC_ACQUIRE);
+}
+
 static int site_is(uint64_t site, const uint32_t expect[4])
 {
     for (uint32_t n = 0; n < 4u; n++)
@@ -1087,6 +1118,43 @@ int hsfc_fingerprint(void)
            site_is(POOL_FREE_SITE, POOL_EXPECT) && rates_fingerprint();
 }
 
+static int hook_attach(void *context, uint32_t index)
+{
+    const struct nlr_api *api = context;
+    switch (index) {
+    case 0:
+        return api->code_hook((void *)(uintptr_t)POOL_FREE_SITE, POOL_EXPECT,
+                              (void *)&pool_free_hook);
+    case 1:
+        return api->code_hook((void *)(uintptr_t)WRITE_FILE_SITE, WRITE_EXPECT,
+                              (void *)&write_hook);
+    case 2:
+        return api->code_hook((void *)(uintptr_t)TDEC_SETUP_SITE, TDEC_EXPECT,
+                              (void *)&tdec_hook);
+    case 3:
+        return api->code_hook((void *)(uintptr_t)RING_ALLOC_SITE, ALLOC_EXPECT,
+                              (void *)&alloc_hook);
+    case 4:
+        return api->code_hook((void *)(uintptr_t)SUBMIT_SITE, SUBMIT_EXPECT,
+                              (void *)&submit_hook);
+    default:
+        return -NLR_API_EINVAL;
+    }
+}
+
+static int hook_detach(void *context, uint32_t index)
+{
+    const struct nlr_api *api = context;
+    switch (index) {
+    case 0: return api->code_unhook((void *)(uintptr_t)POOL_FREE_SITE);
+    case 1: return api->code_unhook((void *)(uintptr_t)WRITE_FILE_SITE);
+    case 2: return api->code_unhook((void *)(uintptr_t)TDEC_SETUP_SITE);
+    case 3: return api->code_unhook((void *)(uintptr_t)RING_ALLOC_SITE);
+    case 4: return api->code_unhook((void *)(uintptr_t)SUBMIT_SITE);
+    default: return -NLR_API_EINVAL;
+    }
+}
+
 int hsfc_install(const struct nlr_api *api, uint64_t block)
 {
     volatile struct heraw_state *state =
@@ -1107,23 +1175,9 @@ int hsfc_install(const struct nlr_api *api, uint64_t block)
      * tier's rate that its decode would not follow; the submit last. HE RAW
      * can be chosen at any time, so all five stay attached; until then each
      * lets the camera through after a load or two. */
-    int result = api->code_hook((void *)(uintptr_t)POOL_FREE_SITE, POOL_EXPECT,
-                                (void *)&pool_free_hook);
+    int result = heraw_install_hooks(&state->install,
+                                     (void *)(uintptr_t)api, 5u,
+                                     hook_attach, hook_detach);
     state->hook_pool = result;
-    if (result != 0)
-        return result;
-    result = api->code_hook((void *)(uintptr_t)WRITE_FILE_SITE, WRITE_EXPECT,
-                            (void *)&write_hook);
-    if (result != 0)
-        return result;
-    result = api->code_hook((void *)(uintptr_t)TDEC_SETUP_SITE, TDEC_EXPECT,
-                            (void *)&tdec_hook);
-    if (result != 0)
-        return result;
-    result = api->code_hook((void *)(uintptr_t)RING_ALLOC_SITE, ALLOC_EXPECT,
-                            (void *)&alloc_hook);
-    if (result != 0)
-        return result;
-    return api->code_hook((void *)(uintptr_t)SUBMIT_SITE, SUBMIT_EXPECT,
-                          (void *)&submit_hook);
+    return result;
 }

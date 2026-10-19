@@ -25,6 +25,7 @@
  */
 #include "menu.h"
 #include "block.h"
+#include "hsfc.h"
 
 /* One label per tier, its text slot SLOT_HSFC_FIRST + tier - 1. */
 static const char TIER_LABEL[TIER_COUNT][16] = {
@@ -71,7 +72,7 @@ int menu_slots_ready(void)
 static uint64_t quality_refresh(void *window)
 {
     uint64_t result = FW(fw_handler_t, QUALITY_REFRESH)(window);
-    if (!he_raw_on())
+    if (!hsfc_ready() || !he_raw_on())
         return result;
     void *value = fw_row_value(window, QUALITY_HSFC_ROW, VALUE_WIDGET);
     if (value)
@@ -84,6 +85,8 @@ static uint64_t quality_refresh(void *window)
  * row. */
 static uint64_t hsfc_entry(void *window)
 {
+    if (!hsfc_ready())
+        return FW(fw_handler_t, HSFC_ENTRY)(window);
     uint32_t tier = he_raw_tier();
     if (!tier)
         return FW(fw_handler_t, HSFC_ENTRY)(window);
@@ -101,7 +104,8 @@ static uint64_t hsfc_entry(void *window)
     static void pick_tier_##n(struct fw_nav *nav)   \
     {                                               \
         (void)nav;                                  \
-        wr8(STORE_HE_RAW, n);                       \
+        if (hsfc_ready())                            \
+            wr8(STORE_HE_RAW, n);                   \
     }
 PICK_TIER(1)
 PICK_TIER(2)
@@ -253,4 +257,23 @@ int menu_install(uint64_t block)
     wr64(HSFC_HANDLERS, (uint64_t)(uintptr_t)&hsfc_entry);
     wr64(QUALITY_HANDLERS + 4u * 8u, (uint64_t)(uintptr_t)&quality_refresh);
     return 0;
+}
+
+int menu_uninstall(void)
+{
+    /* Hide custom behavior first, then reduce the page before putting its
+     * stock arrays back. Custom callbacks also check hsfc_ready(), so even
+     * an interrupted restoration remains inert. */
+    wr64(QUALITY_HANDLERS + 4u * 8u, QUALITY_REFRESH);
+    wr64(HSFC_HANDLERS, HSFC_ENTRY);
+    wr16(HSFC_PAGE + PAGE_COUNT, HSFC_ROWS);
+    wr64(HSFC_PAGE + PAGE_EVPTRS, HSFC_EVPTRS);
+    wr64(HSFC_PAGE + PAGE_ITEMS, HSFC_ITEMS);
+    return rd64(QUALITY_HANDLERS + 4u * 8u) == QUALITY_REFRESH &&
+                   rd64(HSFC_HANDLERS) == HSFC_ENTRY &&
+                   rd16(HSFC_PAGE + PAGE_COUNT) == HSFC_ROWS &&
+                   rd64(HSFC_PAGE + PAGE_EVPTRS) == HSFC_EVPTRS &&
+                   rd64(HSFC_PAGE + PAGE_ITEMS) == HSFC_ITEMS
+               ? 0
+               : -NLR_API_EIO;
 }

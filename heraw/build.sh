@@ -21,7 +21,7 @@ COMMON="--target=aarch64-none-elf -march=armv8-a -mgeneral-regs-only
  -fno-asynchronous-unwind-tables -fPIC -fvisibility=hidden -nostdinc
  -isystem $RES -I $SDK -I $HERE -fno-jump-tables -fno-builtin -O2
  -Wall -Wextra -Werror"
-for f in block hsfc menu nef start; do
+for f in block install hsfc menu nef start; do
     $CC $COMMON -c "$HERE/$f.c" -o "$OUT/obj/$f.o"
 done
 $CC --target=aarch64-none-elf -x assembler-with-cpp -DNLR_PROGRAM_EXTENSION \
@@ -30,6 +30,7 @@ N="$ROOT/tool/nloader/target/debug/nloader"
 "$N" program --decl "$HERE/heraw.json" \
     --object "$OUT/obj/crt0.o" --object "$OUT/obj/start.o" \
     --object "$OUT/obj/menu.o" --object "$OUT/obj/hsfc.o" \
-    --object "$OUT/obj/block.o" --object "$OUT/obj/nef.o" \
+    --object "$OUT/obj/block.o" --object "$OUT/obj/install.o" \
+    --object "$OUT/obj/nef.o" \
     --manifest "$OUT/MANIFEST" --out "$OUT/HERAW.NLB"
 ls -l "$OUT/HERAW.NLB"
